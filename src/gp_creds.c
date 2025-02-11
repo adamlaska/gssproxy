@@ -667,8 +667,24 @@ uint32_t gp_add_krb5_creds(uint32_t *min,
         }
     } else { /* impersonation */
         switch (acquire_type) {
-        case ACQ_NORMAL:
-            ret_maj = gss_acquire_cred_from(&ret_min, GSS_C_NO_NAME,
+        case ACQ_NORMAL: {
+            struct gp_service *svc = gpcall->service;
+            gss_name_t host_principal = GSS_C_NO_NAME;
+
+            if (svc->krb5.principal) {
+                /* configuration dictates to use a specific name */
+                gss_buffer_desc const_buf;
+                const_buf.value = svc->krb5.principal;
+                const_buf.length = strlen(svc->krb5.principal) + 1;
+
+                ret_maj = gss_import_name(&ret_min, &const_buf,
+                                          discard_const(GSS_KRB5_NT_PRINCIPAL_NAME),
+                                          &host_principal);
+                if (ret_maj) {
+                    goto done;
+                }
+            }
+            ret_maj = gss_acquire_cred_from(&ret_min, host_principal,
                                             GSS_C_INDEFINITE,
                                             &desired_mechs, GSS_C_BOTH,
                                             &cred_store, &impersonator_cred,
@@ -714,6 +730,7 @@ uint32_t gp_add_krb5_creds(uint32_t *min,
 
             input_cred = impersonator_cred;
             break;
+        }
         case ACQ_IMPNAME:
             input_cred = in_cred;
             break;
@@ -800,6 +817,7 @@ done:
     gss_release_cred(&discard, &user_cred);
     gss_release_name(&discard, &target_name);
     gss_delete_sec_context(&discard, &initiator_context, NULL);
+    gss_delete_sec_context(&discard, &acceptor_context, NULL);
     gss_release_buffer(&discard, &init_token);
     gss_release_buffer(&discard, &accept_token);
     gss_release_name(&discard, &req_name);
